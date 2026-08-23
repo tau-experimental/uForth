@@ -833,6 +833,16 @@ void forth_cmd_backslash(void) {
 /* Изолированный массив 64-битных Си-указателей хоста */
 static FILE *sys_file_table[MAX_OPEN_FILES] = { NULL };
 
+void purge_sys_file_table (void) {
+	/* экстренная чистка таблицы подвешенных файлов */
+    for (uint32_t i = 0; i < MAX_OPEN_FILES; i++) {
+        if (sys_file_table[i] != NULL) {
+            fclose(sys_file_table[i]);
+            sys_file_table[i] = NULL; /* заземление подвисшего файла */
+        }
+    }
+}
+
 void forth_primitive_f_open(void) {
     if (!current_forth_vm) return;
 

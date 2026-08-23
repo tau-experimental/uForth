@@ -78,6 +78,8 @@ int main(int argc, char *argv[]) {
             system_forth_instance.sp = 0;
             system_forth_instance.rp = 0;
             system_forth_instance.state = 0; /* Secure fallback to interactive execution mode */
+
+            purge_sys_file_table ();
         }
 
         /* Скармливаем строку нашему сквозному, защищенному от пробелов токенизатору */

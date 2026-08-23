@@ -33,6 +33,9 @@ extern volatile uint32_t vm_quiet_mode;
 /* Инициализация подсистемы словаря */
 void dict_init(void);
 
+/* экстренная очистка таблиы трансляции файлов */
+void purge_sys_file_table (void);
+
 /* Поиск слова по имени (сначала ищет в SPI-RAM, затем во встроенном словаре Flash) */
 uint32_t dict_find(const char *name, forth_xt_t *out_builtin_xt);
 
