@@ -165,6 +165,7 @@ void forth_export_runtime_snapshot_csv(const char *filename) {
      * Так как встроенный словарь — это нативные Си-структуры в памяти ПК хоста,
      * мы обходим его через обычные Си-указатели, проверяя правильность флагов ядра.
      */
+#if 0 /* требуется полная перестройка этого фрагмента */
     extern const forth_word_builtin_t w_colon; /* Наше корневое слово */
     const forth_word_builtin_t *b_walker = &w_colon;
     uint32_t b_word_idx = 0;
@@ -184,6 +185,7 @@ void forth_export_runtime_snapshot_csv(const char *filename) {
 
 		b_walker = b_walker->link;
 	}
+#endif
 
     fclose(f);
     printf("[DEBUG SNAPSHOT] Full runtime snapshot successfully exported to '%s'\n", filename);

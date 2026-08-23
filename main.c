@@ -25,13 +25,16 @@ int main(int argc, char *argv[]) {
     chunk_pool_init();
     heap_init();
 
+    forth_dict_validate_sorting();
+
     /* 2. Инициализация нашей чистой, изолированной контекстной переменной */
     /* Выделяем под словарь словаря штатные 512 КБ во внешней SPI-RAM (отметка 0x80000) */
     vm_context_init(&system_forth_instance, EXT_SPI_RAM_BASE + 0x80000);
     dict_init();
 
-    printf("\n[SYSTEM] Flash Builtin Dictionary Size: %u words.\n", 37); // Наша эталонная цепь
-    printf("[SYSTEM] Memory tier allocation frontier secured.\n\n");
+
+    //printf("\n[SYSTEM] Flash Builtin Dictionary Size: %u words.\n", 37); // Наша эталонная цепь
+    //printf("[SYSTEM] Memory tier allocation frontier secured.\n\n");
 
     /* 3. Главный интерактивный цикл REPL */
     while (1) {

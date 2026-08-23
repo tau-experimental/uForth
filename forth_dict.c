@@ -25,92 +25,124 @@ static const char *const flash_init_constants[] = {
 
 #define INIT_CONSTANTS_COUNT  (sizeof(flash_init_constants) / sizeof(flash_init_constants[0]))
 
-/* Перечисление уникальных ID для встроенных Си-примитивов (Execution Tokens) */
-enum {
-    XT_NONE = 0,
-	XT_ABORT,                 /* abort */
-    XT_EXIT,
-    XT_CR,
-    XT_DOT,
-	XT_DOT_UNSIGNED, /* u. */
-	XT_DOT_HEX,		/* h. */
-	XT_DOT_BINARY,	/* b. */
-	XT_DOT_FORMATTED,
-    XT_MUL,
-    XT_SUB,
-    XT_ADD,
-    XT_AND,        /* and */
-    XT_OR,         /* or */
-    XT_XOR,        /* xor */
-    XT_INVERT,     /* invert */
-    XT_LSHIFT,     /* lshift (логический сдвиг влево) */
-    XT_RSHIFT,     /* rshift (логический сдвиг вправо) */
-    XT_ARSHIFT,     /* arshift (арифметический сдвиг вправо) */
-    XT_DROP,
-    XT_OVER,
-    XT_SWAP,
-    XT_DUP,
-    XT_0EQUAL, /* НОВЫЙ ТОКЕН ШАГА 8 */
-    /* ОПЕРАТОРЫ ОТНОШЕНИЙ ШАГА 8 */
-    XT_EQUAL,       /* =  */
-    XT_NOT_EQUAL,   /* <> */
-    XT_LESS_THAN,   /* <  */
-    XT_GREATER_THAN,/* >  */
-    XT_FAST_CELL_FREE,
-    XT_FAST_CELL,
-    XT_FREE_CHUNK,
-    XT_ALLOC_CHUNK,
-    XT_FREE,
-    XT_ALLOCATE,
+void dummy_xt(void) {
+	/* Заглушка для инструкций, выполняемых парсером */
+}
 
-	XT_TYPE,				/* type */
-	XT_COUNT,                 /* count */
-
-    XT_SEMICOLON,
-    XT_COLON,
-    XT_DOT_QUOTE,     /* ." */
-    XT_PRIMITIVE_P_DOT_QUOTE, /* Скрытый рантайм-примитив (.") */
-    XT_S_QUOTE,               /* s" */
-    XT_PRIMITIVE_P_S_QUOTE,   /* Скрытый рантайм-примитив (s") */
-    XT_INCLUDED,               /* Теперь это честный Си-примитив ядра! */
-    /* НОВЫЙ ТОКЕН ДЛЯ ВЫГРУЗКИ КАРТЫ ПАМЯТИ */
-    XT_MEM_DUMP,
-    /* ТОКЕНЫ РАБОТЫ С ПАМЯТЬЮ */
-	XT_STORE,       /* !  */
-	XT_FETCH,       /* @  */
-	XT_C_STORE,     /* c! */
-	XT_C_FETCH,     /* c@ */
-
-    XT_LIT,
-    XT_BRANCH,
-    XT_0BRANCH,
-    XT_CMD_IF,
-    XT_CMD_ELSE,
-    XT_CMD_THEN,
-
-    XT_CMD_BEGIN,
-    XT_CMD_UNTIL,
-    XT_CMD_AGAIN,
-	XT_BACKSLASH, /* НОВЫЙ ТОКЕН ШАГА 9 ДЛЯ КОММЕНТАРИЕВ */
-    XT_CMD_CHAR,      /* CHAR */
-    XT_CMD_BRACKET_CHAR, /* [CHAR] */
-	XT_EMIT,
-    XT_TO_R,   /* >r */
-    XT_FROM_R,  /* r> */
-	XT_CMD_VARIABLE,          /* variable keyword compiler token */
-	XT_PRIMITIVE_P_VARIABLE,   /* The hidden execution-time worker token */
-    XT_CMD_CONSTANT,            /* constant */
-    XT_PRIMITIVE_P_CONSTANT,     /* Скрытый рантайм-обработчик константы */
-	XT_CMD_VALUE,            /* value */
-	XT_PRIMITIVE_P_TO,
-    XT_CMD_TO,               /* to */
-    XT_PRIMITIVE_P_VALUE,     /* Скрытый рантайм-обработчик значения */
-	XT_F_OPEN,              /* s" filename" f-open  ( c-addr len -- file-id ) */
-	XT_F_CREATE,              /* s" filename" f-create  ( c-addr len -- file-id ) */
-	XT_F_WRITE,               /* buf-addr len file-id f-write ( -- )              */
-	XT_F_READ,                /* buf-addr max file-id f-read  ( -- actual-len )   */
-	XT_F_CLOSE                /* file-id f-close              ( -- ) */
+/* Внимание разработчику: массив ДОЛЖЕН быть строго отсортирован по ASCII возрастанию! */
+static const forth_word_builtin_t builtin_words[] = {
+    /* { name, handler, xt_id, is_immediate } */
+    { "+",     forth_add,    			XT_ADD,  0 },
+    { "-",     forth_sub,    			XT_SUB,  0 },
+	{ "->", dummy_xt, XT_CMD_TO, 1 }, /* перехват в парсере */
+	{ "*",		forth_mul, 				XT_MUL, 0},
+	{ ".",		forth_dot, 				XT_DOT, 0},
+	{ ":",	forth_cmd_colon, XT_COLON, 1 },
+	{ ";",	forth_cmd_semicolon, XT_SEMICOLON, 0 },
+	{ ".\\", forth_dual_dot_quote, XT_DOT_QUOTE, 1},
+	{ "\\", forth_cmd_backslash, XT_BACKSLASH, 1},
+	{ ">", forth_greater_than, XT_GREATER_THAN, 0},
+	{ ">R", forth_primitive_to_r, XT_TO_R, 0},
+	{ "=", forth_equal, XT_EQUAL, 0},
+	{ "<", forth_less_than, XT_LESS_THAN, 0},
+	{ "<>", forth_not_equal, XT_NOT_EQUAL, 0},
+	{ "@", forth_primitive_fetch, XT_FETCH, 0 },
+	{ "!", forth_primitive_store, XT_STORE, 0 },
+	{ "[CHAR]", dummy_xt, XT_CMD_BRACKET_CHAR, 1}, /* костыль парсера */
+	{ "0=", forth_0equal, XT_0EQUAL, 0},
+    { "ABORT", forth_primitive_abort,  XT_ABORT,  0 },  //
+	{ "AGAIN", forth_cmd_again, XT_CMD_AGAIN, 1},
+	{ "ALLOC-CHUNK", forth_cmd_alloc_chunk, XT_ALLOC_CHUNK, 0 },
+	{ "ALLOCATE", forth_cmd_allocate, XT_ALLOCATE, 0 },
+	{ "AND", forth_primitive_and, XT_AND, 0 },
+	{ "ARSHIFT", forth_primitive_arshift, XT_ARSHIFT, 0 },
+    { "BEGIN", forth_cmd_begin,        XT_CMD_BEGIN,  1 },
+	{ "C@", forth_primitive_c_fetch, XT_C_FETCH, 0 },
+	{ "C!", forth_primitive_c_store, XT_C_STORE, 0 },
+	{ "CHAR", dummy_xt, XT_CMD_CHAR, 0 }, /* костыль парсера */
+	{ "CR",    forth_cr,				XT_CR,	0 },
+	{ "COUNT", forth_primitive_count, XT_COUNT, 0 },
+	{ "CONSTANT", dummy_xt, XT_CMD_CONSTANT, 0 },
+	{ "DUP", forth_dup, XT_DUP, 0 },
+	{ "DROP", forth_drop,        XT_DROP,  0 },
+	{ "ELSE", forth_cmd_else, XT_CMD_ELSE, 1 },
+	{ "EMIT", forth_primitive_emit, XT_EMIT, 0 },
+	{ "IF", forth_cmd_if, XT_CMD_IF, 1 },
+	{ "INCLUDED", forth_primitive_included, XT_INCLUDED, 0 },
+	{ "INVERT", forth_primitive_invert, XT_INVERT, 0 },
+	{ "F-CLOSE", forth_primitive_f_close, XT_F_CLOSE, 0 },
+	{ "F-CREATE", forth_primitive_f_create, XT_F_CREATE, 0 },
+	{ "F-OPEN", forth_primitive_f_open, XT_F_OPEN, 0 },
+	{ "F-READ", forth_primitive_f_read, XT_F_READ, 0 },
+	{ "F-WRTE", forth_primitive_f_write, XT_F_WRITE, 0 },
+	{ "FAST-CELL-FREE", forth_cmd_fast_cell_free, XT_FAST_CELL_FREE, 0 },
+	{ "FAST-CELL", forth_cmd_fast_cell,  XT_FAST_CELL, 0},
+	{ "FREE-CHUNK", forth_cmd_free_chunk, XT_FREE_CHUNK, 0 },
+	{ "FREE", forth_cmd_free, XT_FREE, 0 },
+	{ "LSHIFT", forth_primitive_lshift, XT_LSHIFT, 0 },
+	{ "MEM-DUMP", forth_cmd_mem_dump, XT_MEM_DUMP, 0 },
+	{ "OR", forth_primitive_or, XT_OR, 0 },
+	{ "OVER", forth_over,        XT_OVER,  0 },
+	{ "R>", forth_primitive_from_r, XT_FROM_R, 0 },
+	{ "RSHIFT", forth_primitive_rshift, XT_LSHIFT, 0 },
+	{ "S\"", forth_dual_s_quote, XT_S_QUOTE, 1 },
+	{ "SWAP", forth_swap,        XT_SWAP,  0 },
+	{ "THEN", forth_cmd_then, XT_CMD_THEN, 1 },
+	{ "TO", dummy_xt, XT_CMD_TO, 1 }, /* синоним "стрелки" -> перехват в парсере */
+	{ "TYPE", forth_primitive_type, XT_TYPE , 0 },
+	{ "VALUE", dummy_xt, XT_CMD_VALUE, 0 }, /* не ошибка ли? */
+	{ "VARIABLE", dummy_xt, XT_CMD_VARIABLE, 0 },
+    { "UNTIL", forth_cmd_until,        XT_CMD_UNTIL,  1 },
+	{ "H.",	forth_primitive_dot_hex, XT_DOT_HEX, 0 },
+	{ "U.", forth_primitive_dot_unsigned, XT_DOT_UNSIGNED, 0 },
+	{ "B.", forth_primitive_dot_binary, XT_DOT_BINARY, 0 },
+	{ "Q.", forth_primitive_dot_formatted, XT_DOT_FORMATTED, 0 },
+	{ "XOR", forth_primitive_xor, XT_XOR, 0 },
 };
+
+void forth_dual_s_quote (void) {
+	/* ToDo: в рантайме исполняет примитив forth_primitive_p_s_quote,
+	 * в режиме компиляции - команду forth_cmd_s_quote
+	 */
+}
+
+void forth_dual_dot_quote (void) {
+	/* ToDo: аналогично forth_dual_s_quote */
+}
+
+
+#define BUILTIN_WORDS_COUNT (sizeof(builtin_words) / sizeof(builtin_words[0]))
+
+/* Компаратор для двоичного поиска */
+static int compare_builtin_nodes(const void *key, const void *element) {
+    const char *search_name = (const char *)key;
+    const forth_word_builtin_t *word = (const forth_word_builtin_t *)element;
+    return strcmp(search_name, word->name);
+}
+
+/* Высокоскоростной двоичный поиск за O(log N) */
+const forth_word_builtin_t* find_builtin(const char *token) {
+    return (const forth_word_builtin_t*) bsearch(
+        token,
+        builtin_words,
+        BUILTIN_WORDS_COUNT,
+        sizeof(forth_word_builtin_t),
+        compare_builtin_nodes
+    );
+}
+
+/* ЮНИТ-ТЕСТ: Защита от кривых рук при добавлении новых слов */
+void forth_dict_validate_sorting(void) {
+    for (size_t i = 0; i < BUILTIN_WORDS_COUNT - 1; i++) {
+        if (strcmp(builtin_words[i].name, builtin_words[i + 1].name) >= 0) {
+            // Нарушение порядка! Выводим ошибку и аварийно останавливаемся
+            char error_buf[128];
+            // Безопасно форматируем без динамической аллокации
+            forth_abort_with_context("[CRITICAL]: Flash dictionary sorting broken!");
+            return;
+        }
+    }
+}
 
 void forth_primitive_abort(void) {
     /* Вызываем наш готовый контекстный сброс, который мы отладили ранее */
@@ -350,14 +382,7 @@ void forth_greater_than(void) {
     forth_push ((a > b) ? -1 : 0);
 }
 
-void forth_cmd_semicolon(void);
-void forth_cmd_colon(void);
-void forth_cmd_if(void);
-void forth_cmd_else(void);
-void forth_cmd_then(void);
 
-void forth_cmd_included(void);
-void forth_primitive_included(void);
 
 void forth_cmd_mem_dump(void) {
     /* Вызываем наш готовый CSV-экспорт */
@@ -397,7 +422,7 @@ void forth_cmd_bracket_char(const char **line_ptr) {
         uint32_t free_ptr = current_forth_vm->dict_free_ptr;
         hw_write32(free_ptr, XT_LIT);
         hw_write32(free_ptr + 4, (uint32_t)ch);
-        hw_write32(current_forth_vm->dict_free_ptr, free_ptr + 8);
+        current_forth_vm->dict_free_ptr = free_ptr + 8;
     } else {
         forth_abort("[CHAR] missing argument");
     }
@@ -623,6 +648,7 @@ void forth_primitive_p_to(void) {
 
 /* компилятор префикса TO / -> */
 void forth_cmd_to(const char **line_ptr) {
+#if 0 /* <- код требует переработки, сейчас он даже не компилируется */
     uint32_t state = current_forth_vm->state;
     const char *p = *line_ptr;
 
@@ -667,6 +693,7 @@ void forth_cmd_to(const char **line_ptr) {
             forth_abort_with_context("TO/-> target is not a VALUE");
         }
     }
+#endif
 }
 
 /* The Hidden Worker: What happens when an instantiated variable is actually executed */
@@ -772,47 +799,21 @@ void forth_primitive_from_r(void) {
 }
 
 void forth_primitive_exit(void) {
-    //uint32_t saved_ip = forth_r_pop();
-    //hw_write32(SYS_VARS_BASE + 28, saved_ip);
 	current_forth_vm->ip = forth_r_pop();
 }
 
 /* Реализация примитивов управления логикой выполнения */
 void forth_primitive_lit(void) {
-    //uint32_t ip = current_forth_vm->ip;
-    //uint32_t literal_val = hw_read32(ip);
-    //forth_push(literal_val);
-    //hw_write32(SYS_VARS_BASE + 28, ip + 4); /* Пропускаем ячейку с числом */
-
     uint32_t literal_val = hw_read32(current_forth_vm->ip);
     forth_push(literal_val);
     current_forth_vm->ip += 4;
 }
 
 void forth_primitive_branch(void) {
-    //uint32_t ip = current_forth_vm->ip;
-    //int32_t offset = (int32_t)hw_read32(ip);
-
-	//int32_t offset = (int32_t)hw_read32(current_forth_vm->ip);
-	//current_forth_vm->ip += offset;
 	current_forth_vm->ip += (int32_t)hw_read32(current_forth_vm->ip);
 }
 
 void forth_primitive_0branch(void) {
-#if 0
-	uint32_t flag;
-	//uint32_t flag = forth_pop();
-    //uint32_t ip = current_forth_vm->ip;
-    if (flag == 0) {
-        //int32_t offset = (int32_t)hw_read32(ip);
-        //hw_write32(SYS_VARS_BASE + 28, ip + offset);
-    	current_forth_vm->ip += (int32_t)hw_read32(current_forth_vm->ip);
-    } else {
-        //hw_write32(SYS_VARS_BASE + 28, ip + 4);
-    	current_forth_vm->ip += 4;
-    }
-#endif
-
     int32_t offset = (forth_pop() == 0) ? (int32_t)hw_read32(current_forth_vm->ip) : 4;
     current_forth_vm->ip += offset;
 }
@@ -1141,6 +1142,7 @@ void forth_cmd_free(void) {
 
 /* Диспетчер вызова нативных Си-функций по их стабильному ID */
 static void execute_native_id(uint32_t token_id) {
+#if 0 /* подлежит исключению, так как сейчас через структуру сделана связка ID :: коллбэк. Но что делать с "костылями"? */
     switch (token_id) {
         case XT_EXIT:           forth_primitive_exit(); break;
         case XT_ABORT:          forth_primitive_abort(); break;
@@ -1236,6 +1238,7 @@ static void execute_native_id(uint32_t token_id) {
             printf("[FORTH FAULT] Attempt to execute unknown Native ID: %u\n", token_id);
             exit(1);
     }
+#endif
 }
 
 /* Диспетчер выполнения шитого кода */
@@ -1349,92 +1352,6 @@ void forth_cmd_else(void) {
 }
 
 
-/* Структура встроенного словаря, привязанная к стабильным ID (XT-токенам) */
-extern const forth_word_builtin_t w_semicolon;
-
-static const forth_word_builtin_t w_cr     = { NULL,     2, "cr",     (forth_xt_t)XT_CR };
-
-static const forth_word_builtin_t w_dot_hex  = { &w_cr,       2, "h.",   (forth_xt_t)XT_DOT_HEX };
-static const forth_word_builtin_t w_dot_uns  = { &w_dot_hex,  2, "u.",   (forth_xt_t)XT_DOT_UNSIGNED };
-static const forth_word_builtin_t w_dot_bin  = { &w_dot_uns,  2, "b.",   (forth_xt_t)XT_DOT_BINARY };
-static const forth_word_builtin_t w_dot_fmt  = { &w_dot_bin,  2, "Q.", (forth_xt_t)XT_DOT_FORMATTED };
-
-static const forth_word_builtin_t w_dot    = { &w_dot_fmt,    1, ".",      (forth_xt_t)XT_DOT };
-static const forth_word_builtin_t w_mul    = { &w_dot,   1, "*",      (forth_xt_t)XT_MUL };
-static const forth_word_builtin_t w_sub    = { &w_mul,   1, "-",      (forth_xt_t)XT_SUB };
-static const forth_word_builtin_t w_add    = { &w_sub,   1, "+",      (forth_xt_t)XT_ADD };
-
-static const forth_word_builtin_t w_arshift = { &w_add, 7, "arshift", (forth_xt_t)XT_ARSHIFT };
-static const forth_word_builtin_t w_rshift  = { &w_arshift, 6, "rshift",  (forth_xt_t)XT_RSHIFT };
-static const forth_word_builtin_t w_lshift  = { &w_rshift,  6, "lshift",  (forth_xt_t)XT_LSHIFT };
-static const forth_word_builtin_t w_invert  = { &w_lshift,  6, "invert",  (forth_xt_t)XT_INVERT };
-static const forth_word_builtin_t w_xor     = { &w_invert,  3, "xor",     (forth_xt_t)XT_XOR };
-static const forth_word_builtin_t w_or      = { &w_xor,     2, "or",      (forth_xt_t)XT_OR };
-static const forth_word_builtin_t w_and     = { &w_or,      3, "and",  (forth_xt_t)XT_AND };
-
-static const forth_word_builtin_t w_drop   = { &w_and,   4, "drop",   (forth_xt_t)XT_DROP };
-static const forth_word_builtin_t w_over   = { &w_drop,  4, "over",   (forth_xt_t)XT_OVER };
-static const forth_word_builtin_t w_swap   = { &w_over,  4, "swap",   (forth_xt_t)XT_SWAP };
-
-static const forth_word_builtin_t w_c_fetch  = { &w_swap,      2, "c@", (forth_xt_t)XT_C_FETCH };
-static const forth_word_builtin_t w_c_store  = { &w_c_fetch,   2, "c!", (forth_xt_t)XT_C_STORE };
-static const forth_word_builtin_t w_fetch    = { &w_c_store,   1, "@",  (forth_xt_t)XT_FETCH };
-static const forth_word_builtin_t w_store    = { &w_fetch,     1, "!",  (forth_xt_t)XT_STORE };
-
-static const forth_word_builtin_t w_greater   = { &w_store,     1, ">",  (forth_xt_t)XT_GREATER_THAN };
-static const forth_word_builtin_t w_less      = { &w_greater,  1, "<",  (forth_xt_t)XT_LESS_THAN };
-static const forth_word_builtin_t w_not_equal = { &w_less,     2, "<>", (forth_xt_t)XT_NOT_EQUAL };
-static const forth_word_builtin_t w_equal     = { &w_not_equal,1, "=",  (forth_xt_t)XT_EQUAL };
-static const forth_word_builtin_t w_0equal = { &w_equal,   2, "0=",     (forth_xt_t)XT_0EQUAL };
-
-static const forth_word_builtin_t w_dup    = { &w_0equal, 3, "dup",    (forth_xt_t)XT_DUP };
-static const forth_word_builtin_t w_f_free = { &w_dup,   14, "fast-cell-free", (forth_xt_t)XT_FAST_CELL_FREE };
-static const forth_word_builtin_t w_f_cell = { &w_f_free, 9,  "fast-cell",      (forth_xt_t)XT_FAST_CELL };
-static const forth_word_builtin_t w_c_free = { &w_f_cell, 10, "free-chunk",     (forth_xt_t)XT_FREE_CHUNK };
-static const forth_word_builtin_t w_c_alloc= { &w_c_free, 11, "alloc-chunk",    (forth_xt_t)XT_ALLOC_CHUNK };
-static const forth_word_builtin_t w_h_free = { &w_c_alloc,4,  "free",           (forth_xt_t)XT_FREE };
-static const forth_word_builtin_t w_h_alloc= { &w_h_free, 8,  "allocate",       (forth_xt_t)XT_ALLOCATE };
-static const forth_word_builtin_t w_mem_dump = { &w_h_alloc, 8, "mem-dump",  (forth_xt_t)XT_MEM_DUMP };
-
-static const forth_word_builtin_t w_type = { &w_mem_dump, 4, "type",  (forth_xt_t)XT_TYPE };
-static const forth_word_builtin_t w_count    = { &w_type,       5, "count",    (forth_xt_t)XT_COUNT };
-
-static const forth_word_builtin_t w_again = { &w_count, FLAG_IMMEDIATE | 5, "again", (forth_xt_t)XT_CMD_AGAIN };
-static const forth_word_builtin_t w_until = { &w_again,   FLAG_IMMEDIATE | 5, "until", (forth_xt_t)XT_CMD_UNTIL };
-static const forth_word_builtin_t w_begin = { &w_until,   FLAG_IMMEDIATE | 5, "begin", (forth_xt_t)XT_CMD_BEGIN };
-
-static const forth_word_builtin_t w_f_close  = { &w_begin,     7, "f-close",  (forth_xt_t)XT_F_CLOSE };
-static const forth_word_builtin_t w_f_read   = { &w_f_close,   6, "f-read",   (forth_xt_t)XT_F_READ };
-static const forth_word_builtin_t w_f_write  = { &w_f_read,    7, "f-write",  (forth_xt_t)XT_F_WRITE };
-static const forth_word_builtin_t w_f_create = { &w_f_write,   8, "f-create", (forth_xt_t)XT_F_CREATE };
-static const forth_word_builtin_t w_f_open = { &w_f_create,   6, "f-open", (forth_xt_t)XT_F_OPEN };
-
-static const forth_word_builtin_t w_abort    = { &w_f_open,   5, "abort",    (forth_xt_t)XT_ABORT };
-static const forth_word_builtin_t w_included  = { &w_abort,  8, "included", (forth_xt_t)XT_INCLUDED };
-static const forth_word_builtin_t w_bracket_char = { &w_included, FLAG_IMMEDIATE | 6, "[CHAR]", (forth_xt_t)XT_CMD_BRACKET_CHAR };
-static const forth_word_builtin_t w_char         = { &w_bracket_char, 4, "CHAR", (forth_xt_t)XT_CMD_CHAR };
-
-static const forth_word_builtin_t w_variable = { &w_char, 8, "variable", (forth_xt_t)XT_CMD_VARIABLE };
-
-static const forth_word_builtin_t w_emit = { &w_variable, 4, "emit", (forth_xt_t)XT_EMIT };
-static const forth_word_builtin_t w_from_r = { &w_emit,   2, "r>", (forth_xt_t)XT_FROM_R };
-static const forth_word_builtin_t w_to_r   = { &w_from_r, 2, ">r", (forth_xt_t)XT_TO_R };
-
-static const forth_word_builtin_t w_to_arrow       = { &w_to_r,  FLAG_IMMEDIATE | 2, "->",    (forth_xt_t)XT_CMD_TO };
-static const forth_word_builtin_t w_to_to       = { &w_to_arrow,  FLAG_IMMEDIATE | 2, "to",    (forth_xt_t)XT_CMD_TO };
-static const forth_word_builtin_t w_value    = { &w_to_to,        5, "value", (forth_xt_t)XT_CMD_VALUE };
-static const forth_word_builtin_t w_constant = { &w_value, 8, "constant", (forth_xt_t)XT_CMD_CONSTANT };
-static const forth_word_builtin_t w_backslash    = { &w_constant,  FLAG_IMMEDIATE | 1, "\\", (forth_xt_t)XT_BACKSLASH };
-
-static const forth_word_builtin_t w_s_quote   = { &w_backslash, FLAG_IMMEDIATE | 2, "s\"", (forth_xt_t)XT_S_QUOTE };
-static const forth_word_builtin_t w_dotquote = { &w_s_quote, FLAG_IMMEDIATE | 1, ".\"", (forth_xt_t)XT_DOT_QUOTE };
-static const forth_word_builtin_t w_then  = { &w_dotquote,    FLAG_IMMEDIATE | 4, "then", (forth_xt_t)XT_CMD_THEN };
-static const forth_word_builtin_t w_else  = { &w_then,    FLAG_IMMEDIATE | 4, "else", (forth_xt_t)XT_CMD_ELSE };
-static const forth_word_builtin_t w_if    = { &w_else,    FLAG_IMMEDIATE | 2, "if",   (forth_xt_t)XT_CMD_IF };
-const forth_word_builtin_t w_semicolon = { &w_if, FLAG_IMMEDIATE | 1, ";", (forth_xt_t)XT_SEMICOLON };
- const forth_word_builtin_t w_colon     = { &w_semicolon, 1, ":", (forth_xt_t)XT_COLON };
-
-static const forth_word_builtin_t *builtin_root = &w_colon;
 
 void dict_init(void) {
     current_forth_vm->latest_word = 0;
@@ -1459,10 +1376,11 @@ void dict_init(void) {
 
 	/* Возвращаем консоль в стандартный интерактивный режим */
 	current_forth_vm->quiet_mode = 0;
-	printf("[SYSTEM] %u system format constants successfully secured.\n", INIT_CONSTANTS_COUNT);
+	printf("[SYSTEM] %u system format constants successfully secured.\n", (uint32_t)INIT_CONSTANTS_COUNT);
 }
 
 uint32_t dict_find(const char *name, forth_xt_t *out_builtin_xt) {
+#if 0 /* <-- код полностью нерабочий и требует перестройки заново */
     uint32_t name_len = strlen(name);
     uint32_t curr_word = current_forth_vm->latest_word;
 
@@ -1497,6 +1415,7 @@ uint32_t dict_find(const char *name, forth_xt_t *out_builtin_xt) {
         curr_builtin = curr_builtin->link;
     }
     return 0;
+#endif
 }
 
 /*
@@ -1553,7 +1472,24 @@ static int parse_forth_number(const char *token, uint32_t *out_val) {
 /* Очистка токена от мусора и выполнение */
 static void process_token(const char *token_name) {
 	if (current_forth_vm->abort_flag) return;
-	/* СНАЧАЛА проверяем, не является ли токен числом (в любом базисе) */
+
+	const forth_word_builtin_t *word = find_builtin(token_name);
+
+    if (word != NULL) {
+        // 2. Универсальное правило Форта:
+        // Вызываем функцию, если слово IMMEDIATE *ИЛИ* мы в режиме REPL
+        if (word->is_immediate || current_forth_vm->state == 0) {
+            word->handler(); // Единый вызов Си-функции!
+        } else {
+            // Иначе — мы в режиме компиляции, и это обычное слово.
+            // Просто пишем его XT в SPI-RAM, Си-функцию вызывать НЕ НАДО.
+        	hw_write32 (current_forth_vm->dict_free_ptr, word->xt_id); /* адрес указывает в область "SPI-память", функция сама поймёт */
+            current_forth_vm->dict_free_ptr += 4;
+        }
+        return;
+    }
+
+	/* проверяем, не является ли токен числом (в любом базисе) */
 	uint32_t numeric_val = 0;
 	if (parse_forth_number(token_name, &numeric_val)) {
 
@@ -1570,24 +1506,16 @@ static void process_token(const char *token_name) {
 		return;
 	}
 
-	/* ЕСЛИ ЭТО НЕ ЧИСЛО — ищем в текстовом словаре (Flash и SPI-RAM) */
+	/* ЕСЛИ ЭТО НЕ ЧИСЛО — ищем в пользовательском словаре (SPI-RAM) */
 
+#if 0 /* * Здесь пока всё ещё далеко до работоспособного состояния!!! */
     uint32_t state = current_forth_vm->state;
     forth_xt_t builtin_xt = NULL;
     uint32_t xt = dict_find(token_name, &builtin_xt);
 
     if (xt != 0) {
         uint8_t is_immediate = 0;
-        if (builtin_xt != NULL) {
-            const forth_word_builtin_t *b = builtin_root;
-            while(b) {
-                if(b->xt == builtin_xt) {
-                    is_immediate = b->flags_len & FLAG_IMMEDIATE;
-                    break;
-                }
-                b = b->link;
-            }
-        }
+
 
         if (xt == (uint32_t)XT_BACKSLASH) {
             line_comment_flag = 1;
@@ -1622,6 +1550,7 @@ static void process_token(const char *token_name) {
             current_forth_vm->abort_flag = 1;
         }
     }
+#endif
 }
 
 void forth_interpret_line(const char *line) {
