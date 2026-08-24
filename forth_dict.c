@@ -32,23 +32,24 @@ void dummy_xt(void) {
 /* Внимание разработчику: массив ДОЛЖЕН быть строго отсортирован по ASCII возрастанию! */
 static const forth_word_builtin_t builtin_words[] = {
     /* { name, handler, xt_id, is_immediate } */
+	{ "!", forth_primitive_store, XT_STORE, 0 },
+	{ ".\"", NULL, 0, 0 }, // заглушка для ."
+	{ "*",		forth_mul, 				XT_MUL, 0},
     { "+",     forth_add,    			XT_ADD,  0 },
     { "-",     forth_sub,    			XT_SUB,  0 },
-	{ "->", dummy_xt, XT_CMD_TO, 1 }, /* перехват в парсере */
-	{ "*",		forth_mul, 				XT_MUL, 0},
+	{ "->", forth_dual_to, XT_CMD_TO, 1 }, /* перехват в парсере */
 	{ ".",		forth_dot, 				XT_DOT, 0},
+	{ ".\\", forth_dual_dot_quote, XT_DOT_QUOTE, 1},
 	{ ":",	forth_cmd_colon, XT_COLON, 1 },
 	{ ";",	forth_cmd_semicolon, XT_SEMICOLON, 0 },
-	{ ".\\", forth_dual_dot_quote, XT_DOT_QUOTE, 1},
-	{ "\\", forth_cmd_backslash, XT_BACKSLASH, 1},
-	{ ">", forth_greater_than, XT_GREATER_THAN, 0},
-	{ ">R", forth_primitive_to_r, XT_TO_R, 0},
-	{ "=", forth_equal, XT_EQUAL, 0},
 	{ "<", forth_less_than, XT_LESS_THAN, 0},
 	{ "<>", forth_not_equal, XT_NOT_EQUAL, 0},
+	{ "\\", forth_cmd_backslash, XT_BACKSLASH, 1},
+	{ "=", forth_equal, XT_EQUAL, 0},
+	{ ">", forth_greater_than, XT_GREATER_THAN, 0},
+	{ ">R", forth_primitive_to_r, XT_TO_R, 0},
 	{ "@", forth_primitive_fetch, XT_FETCH, 0 },
-	{ "!", forth_primitive_store, XT_STORE, 0 },
-	{ "[CHAR]", dummy_xt, XT_CMD_BRACKET_CHAR, 1}, /* костыль парсера */
+	{ "[CHAR]", forth_dual_bracket_char, XT_CMD_BRACKET_CHAR, 1}, /* костыль парсера */
 	{ "0=", forth_0equal, XT_0EQUAL, 0},
     { "ABORT", forth_primitive_abort,  XT_ABORT,  0 },  //
 	{ "AGAIN", forth_cmd_again, XT_CMD_AGAIN, 1},
@@ -59,10 +60,10 @@ static const forth_word_builtin_t builtin_words[] = {
     { "BEGIN", forth_cmd_begin,        XT_CMD_BEGIN,  1 },
 	{ "C@", forth_primitive_c_fetch, XT_C_FETCH, 0 },
 	{ "C!", forth_primitive_c_store, XT_C_STORE, 0 },
-	{ "CHAR", dummy_xt, XT_CMD_CHAR, 0 }, /* костыль парсера */
+	{ "CHAR", forth_dual_bracket_char, XT_CMD_CHAR, 0 }, /* костыль парсера */
 	{ "CR",    forth_cr,				XT_CR,	0 },
 	{ "COUNT", forth_primitive_count, XT_COUNT, 0 },
-	{ "CONSTANT", dummy_xt, XT_CMD_CONSTANT, 0 },
+	{ "CONSTANT", forth_cmd_constant, XT_PRIMITIVE_CONSTANT_RT, 0 },
 	{ "DUP", forth_dup, XT_DUP, 0 },
 	{ "DROP", forth_drop,        XT_DROP,  0 },
 	{ "ELSE", forth_cmd_else, XT_CMD_ELSE, 1 },
@@ -88,10 +89,10 @@ static const forth_word_builtin_t builtin_words[] = {
 	{ "S\"", forth_dual_s_quote, XT_S_QUOTE, 1 },
 	{ "SWAP", forth_swap,        XT_SWAP,  0 },
 	{ "THEN", forth_cmd_then, XT_CMD_THEN, 1 },
-	{ "TO", dummy_xt, XT_CMD_TO, 1 }, /* синоним "стрелки" -> перехват в парсере */
+	{ "TO", forth_dual_to, XT_CMD_TO, 1 }, /* синоним "стрелки" -> перехват в парсере */
 	{ "TYPE", forth_primitive_type, XT_TYPE , 0 },
 	{ "VALUE", dummy_xt, XT_CMD_VALUE, 0 }, /* не ошибка ли? */
-	{ "VARIABLE", dummy_xt, XT_CMD_VARIABLE, 0 },
+	{ "VARIABLE", forth_cmd_variable, XT_PRIMITIVE_VAR_RT, 0 },
     { "UNTIL", forth_cmd_until,        XT_CMD_UNTIL,  1 },
 	{ "H.",	forth_primitive_dot_hex, XT_DOT_HEX, 0 },
 	{ "U.", forth_primitive_dot_unsigned, XT_DOT_UNSIGNED, 0 },
@@ -99,17 +100,6 @@ static const forth_word_builtin_t builtin_words[] = {
 	{ "Q.", forth_primitive_dot_formatted, XT_DOT_FORMATTED, 0 },
 	{ "XOR", forth_primitive_xor, XT_XOR, 0 },
 };
-
-void forth_dual_s_quote (void) {
-	/* ToDo: в рантайме исполняет примитив forth_primitive_p_s_quote,
-	 * в режиме компиляции - команду forth_cmd_s_quote
-	 */
-}
-
-void forth_dual_dot_quote (void) {
-	/* ToDo: аналогично forth_dual_s_quote */
-}
-
 
 #define BUILTIN_WORDS_COUNT (sizeof(builtin_words) / sizeof(builtin_words[0]))
 
@@ -403,22 +393,26 @@ static char get_next_char_from_line(const char **line_ptr) {
     return ch;
 }
 
-void forth_cmd_char(const char **line_ptr) {
-    char ch = get_next_char_from_line(line_ptr);
-    if (ch != '\0') {
-        forth_push((uint32_t)ch);
-    } else {
-        forth_abort("CHAR missing argument");
-    }
+void forth_bracket_char (void) {
+	const char *p = current_forth_vm->parse_line_ptr;
+	char ch = get_next_char_from_line(&p);
+	if (ch != '\0') {
+		forth_push((uint32_t)ch);
+	} else {
+		forth_abort("CHAR missing argument");
+	}
 }
 
-void forth_cmd_bracket_char(const char **line_ptr) {
-    char ch = get_next_char_from_line(line_ptr);
+void forth_dual_bracket_char (void) {
+    // Берем указатель из контекста нашей VM
+    const char *p = current_forth_vm->parse_line_ptr;
+
+    char ch = get_next_char_from_line(&p);
+
+    // Возвращаем обновленный указатель строки обратно в VM, чтобы парсер знал, где мы остановились
+    current_forth_vm->parse_line_ptr = p;
+
     if (ch != '\0') {
-        /*
-         * Поскольку мы находимся внутри определения, [CHAR] работает как макрос:
-         * он компилирует токен XT_LIT и сам ASCII-код символа в SPI-RAM!
-         */
         uint32_t free_ptr = current_forth_vm->dict_free_ptr;
         hw_write32(free_ptr, XT_LIT);
         hw_write32(free_ptr + 4, (uint32_t)ch);
@@ -442,17 +436,172 @@ void forth_primitive_p_s_quote(void) {
     current_forth_vm->ip += aligned_len;
 }
 
-void forth_cmd_s_quote(const char **line_ptr) {
-    uint32_t state = current_forth_vm->state;;
-    const char *p = *line_ptr;
+void forth_cmd_constant(void) {
+    if (current_forth_vm->state == FORTH_STATE_RUNTIME) return; // Защита
+
+    // 1. Выкусываем имя переменной из строки парсера (например, "MY-VAR")
+    const char *p = current_forth_vm->parse_line_ptr;
+    char var_name[FORTH_MAX_WORD_LEN];
+    parse_next_token_to_buf(&p, var_name);
+    current_forth_vm->parse_line_ptr = p;
+
+    // 2. Выделяем 4 байта в SPI-RAM под хранение значения этой переменной
+    uint32_t var_data_addr = current_forth_vm->dict_free_ptr;
+    hw_write32(var_data_addr, 0); // Инициализируем нулем
+    current_forth_vm->dict_free_ptr += 4;
+
+    // 3. Регистрируем новое слово в пользовательском словаре в SPI-RAM.
+    // Передаем имя, рантайм-примитив выполнения переменных (XT_PRIMITIVE_VARIABLE_RT)
+    // и адрес её данных как payload.
+    dict_add_user_word(var_name, XT_PRIMITIVE_VAR_RT, var_data_addr);
+}
+
+void forth_cmd_variable(void) {
+    if (current_forth_vm->state == FORTH_STATE_RUNTIME) return; // Защита
+
+    // 1. Выкусываем имя переменной из строки парсера (например, "MY-VAR")
+    const char *p = current_forth_vm->parse_line_ptr;
+    char var_name[FORTH_MAX_WORD_LEN];
+    parse_next_token_to_buf(&p, var_name);
+    current_forth_vm->parse_line_ptr = p;
+
+    // 2. Выделяем 4 байта в SPI-RAM под хранение значения этой переменной
+    uint32_t var_data_addr = current_forth_vm->dict_free_ptr;
+    hw_write32(var_data_addr, 0); // Инициализируем нулем
+    current_forth_vm->dict_free_ptr += 4;
+
+    // 3. Регистрируем новое слово в пользовательском словаре в SPI-RAM.
+    // Передаем имя, рантайм-примитив выполнения переменных (XT_PRIMITIVE_VARIABLE_RT)
+    // и адрес её данных как payload.
+    dict_add_user_word(var_name, XT_PRIMITIVE_VAR_RT, var_data_addr);
+}
+
+void forth_primitive_var_runtime(void) {
+    // В шитом коде сразу за XT_PRIMITIVE_VAR_RT компилятор сохранил адрес данных
+    uint32_t data_addr = hw_spi_ram_read32(current_forth_vm->ip);
+    current_forth_vm->ip += 4;
+
+    // Просто кладем адрес ячейки памяти на стек данных
+    forth_push(data_addr);
+}
+
+void forth_dual_to(void) {
+    if (current_forth_vm->state == FORTH_STATE_RUNTIME) {
+        /* 1️⃣ РАНТАЙМ: Извлекаем адрес и пишем туда значение со стека */
+        uint32_t target_addr = hw_spi_ram_read32(current_forth_vm->ip);
+        current_forth_vm->ip += 4;
+
+        uint32_t value = forth_pop();
+        hw_write32(target_addr, value);
+        return;
+    }
+
+    /* 2️⃣ ПАРСИНГ ТЕКСТА: Ищем, кому присвоить значение */
+    const char *p = current_forth_vm->parse_line_ptr;
+    char target_name[FORTH_MAX_WORD_LEN];
+    parse_next_token_to_buf(&p, target_name);
+    current_forth_vm->parse_line_ptr = p;
+
+    // Ищем переменную в словаре, чтобы узнать адрес её ячейки памяти
+    uint32_t var_data_addr = dict_find_variable_address(target_name);
+    if (var_data_addr == 0) {
+        forth_abort("Error: Unknown variable target for TO");
+        return;
+    }
+
+    if (current_forth_vm->state == FORTH_STATE_COMPILE) {
+        /* Режим компиляции: запекаем XT_TO и адрес назначения */
+        uint32_t free_ptr = current_forth_vm->dict_free_ptr;
+        hw_write32(free_ptr, XT_CMD_TO); // Запекаем себя же для рантайма
+        hw_write32(free_ptr + 4, var_data_addr);
+        current_forth_vm->dict_free_ptr += 8;
+    } else {
+        /* Режим REPL: Выполняем присваивание немедленно */
+        uint32_t value = forth_pop();
+        hw_write32(var_data_addr, value);
+    }
+}
+
+void forth_dual_s_quote (void) {
+	if (!current_forth_vm) return;
+   switch (current_forth_vm->state) {
+
+		case FORTH_STATE_RUNTIME: {
+			/*
+			 * 1️⃣ СИТУАЦИЯ: Крутится шитый код.
+			 * Текста нет, забираем длину и байты строки из SPI-RAM по указателю 'ip'.
+			 */
+			uint32_t len = hw_spi_ram_read32(current_forth_vm->ip);
+			uint32_t str_addr = current_forth_vm->ip + 4;
+
+			forth_push(str_addr);
+			forth_push(len);
+
+			uint32_t aligned_len = (len + 3) & ~3;
+			current_forth_vm->ip += 4 + aligned_len;
+			break;
+		}
+
+		case FORTH_STATE_COMPILE:
+		case FORTH_STATE_REPL: {
+			/*
+			 * 2️⃣ СИТУАЦИЯ: Работает текстовый парсер.
+			 * Выделяем логику разбора строки из текстового потока в общий блок.
+			 */
+			const char *p = current_forth_vm->parse_line_ptr;
+			if (*p == ' ') p++;
+
+			static char str_buf[STRING_BUFFER_SIZE];
+			uint32_t len = 0;
+
+			while (*p != '\0' && len < FORTH_MAX_STRING_LEN) {
+				if (*p == '\\' && (*(p + 1) == '"' || *(p + 1) == '\\')) {
+					p++;
+					str_buf[len++] = *p++;
+					continue;
+				}
+				if (*p == '"') break;
+				str_buf[len++] = *p++;
+			}
+			if (*p == '"') p++;
+			str_buf[len] = '\0';
+
+			current_forth_vm->parse_line_ptr = p; // Сохраняем указатель текста
+
+			// А теперь смотрим, что делать с распарсенным текстом: запечь или выдать на стек
+			if (current_forth_vm->state == FORTH_STATE_COMPILE) {
+				/* Ветка компиляции текста в код */
+				uint32_t free_ptr = current_forth_vm->dict_free_ptr;
+
+				hw_write32(free_ptr, XT_S_QUOTE); // Запекаем единый XT_ID слова
+				hw_write32(free_ptr + 4, len);
+				hw_spi_ram_write_buf(free_ptr + 8, (const uint8_t *)str_buf, len);
+
+				uint32_t aligned_len = (len + 3) & ~3;
+				current_forth_vm->dict_free_ptr = free_ptr + 8 + aligned_len;
+			} else {
+				/* Ветка интерактивного REPL выполнения текста */
+				uint32_t temp_str_addr = EXT_SPI_RAM_BASE + EXT_SPI_RAM_SIZE - STRING_BUFFER_SIZE;
+				hw_spi_ram_write_buf(temp_str_addr, (const uint8_t *)str_buf, len);
+
+				forth_push(temp_str_addr);
+				forth_push(len);
+			}
+			break;
+		}
+	}
+}
+
+void forth_dual_dot_quote (void) {
+	if (!current_forth_vm) return;
+    uint32_t state = current_forth_vm->state;
+    const char *p = current_forth_vm->parse_line_ptr;
 
     if (*p == ' ') p++;
 
-    /* Декларативный буфер без хардкода */
     char str_buf[STRING_BUFFER_SIZE];
     uint32_t len = 0;
 
-    /* Цикл строго контролируется макросом */
     while (*p != '\0' && len < FORTH_MAX_STRING_LEN) {
         /*
          * ПРОВЕРКА ЭКРАНИРОВАНИЯ:
@@ -475,26 +624,23 @@ void forth_cmd_s_quote(const char **line_ptr) {
     if (*p == '"') p++; /* Пропускаем закрывающую кавычку */
     str_buf[len] = '\0';
 
-    *line_ptr = p;
+    *current_forth_vm->parse_line_ptr = p;
 
     if (state == 1) {
         uint32_t free_ptr = current_forth_vm->dict_free_ptr;
-        hw_write32(free_ptr, XT_PRIMITIVE_P_S_QUOTE);
+        hw_write32(free_ptr, XT_PRIMITIVE_P_DOT_QUOTE);
         hw_write32(free_ptr + 4, len);
 
-        /* Потоковый пакетный сброс в SPI-RAM */
         hw_spi_ram_write_buf(free_ptr + 8, (const uint8_t *)str_buf, len);
 
         uint32_t aligned_len = (len + 3) & ~3;
         current_forth_vm->dict_free_ptr = free_ptr + 8 + aligned_len;
     } else {
-        /* Для REPL используем безопасный хвост SPI-RAM */
-        uint32_t temp_str_addr = EXT_SPI_RAM_BASE + EXT_SPI_RAM_SIZE - STRING_BUFFER_SIZE;
-        hw_spi_ram_write_buf(temp_str_addr, (const uint8_t *)str_buf, len);
-        forth_push(temp_str_addr);
-        forth_push(len);
-    }
-}
+        printf("%s", str_buf);
+    }}
+
+
+
 
 void forth_primitive_count(void) {
     if (!current_forth_vm) return;
@@ -711,41 +857,6 @@ void forth_primitive_p_variable(void) {
     /* Exit the word cleanly by pulling the original return vector off the return stack */
     uint32_t saved_return_ip = forth_r_pop();
     current_forth_vm->ip = saved_return_ip;
-}
-
-/* The Compiler: What happens when you manually type 'variable <name>' in the console */
-void forth_cmd_variable(const char **line_ptr) {
-    const char *p = *line_ptr;
-
-    /* Skip leading whitespace characters to isolate the upcoming name string */
-    while (*p == ' ' || *p == '\t') p++;
-
-    char name_buf[TOKEN_BUFFER_SIZE];
-    uint32_t len = 0;
-
-    while (*p != ' ' && *p != '\t' && *p != '\r' && *p != '\n' && *p != '\0' && len < FORTH_MAX_WORD_LEN) {
-        name_buf[len++] = *p++;
-    }
-    name_buf[len] = '\0';
-    *line_ptr = p;
-
-    if (len == 0) {
-        forth_abort_with_context("VARIABLE missing name argument");
-        return;
-    }
-
-    /* 1. Compile a standard word header into our SPI-RAM dictionary tree */
-    dict_add_word(name_buf);
-
-    /* 2. Append our hidden execution-time worker token as the word's primary body instruction */
-    uint32_t free_ptr = current_forth_vm->dict_free_ptr;
-    hw_write32(free_ptr, XT_PRIMITIVE_P_VARIABLE);
-
-    /* 3. Allocate 4 bytes of empty storage cell space initialized to 0 */
-    hw_write32(free_ptr + 4, 0);
-
-    /* 4. Advance the compilation frontier past both the execution token and the data cell (8 bytes) */
-    current_forth_vm->dict_free_ptr = free_ptr + 8;
 }
 
 void forth_primitive_p_dot_quote(void) {
@@ -1242,28 +1353,25 @@ static void execute_native_id(uint32_t token_id) {
 }
 
 /* Диспетчер выполнения шитого кода */
-void forth_execute_xt(uint32_t xt) {
-    if (!current_forth_vm) return;
+void forth_execute_compiled_xt(uint32_t xt_address) {
+    // Сохраняем старый режим (это может быть FORTH_STATE_REPL или FORTH_STATE_COMPILE, если мы вызвали слово внутри компиляции)
+    uint32_t previous_state = current_forth_vm->state;
+    uint32_t previous_ip = current_forth_vm->ip;
 
-    uint32_t current_ip = xt;
-    uint32_t old_ip = current_forth_vm->ip;
-    forth_r_push(old_ip);
-
-    current_forth_vm->ip = current_ip;
+    // Переключаем рубильник системы в чистый РАНТАЙМ
+    current_forth_vm->state = FORTH_STATE_RUNTIME;
+    current_forth_vm->ip = xt_address;
 
     while (current_forth_vm->ip != 0) {
-        if (current_forth_vm->abort_flag) return;
+        forth_xt_t current_xt = hw_spi_ram_read32(current_forth_vm->ip);
+        current_forth_vm->ip += 4;
 
-        uint32_t ip = current_forth_vm->ip;
-        uint32_t token_xt = hw_read32(ip);
-        current_forth_vm->ip = ip + 4;
-
-        if (token_xt < EXT_SPI_RAM_BASE) {
-            execute_native_id(token_xt);
-        } else {
-            forth_execute_xt(token_xt);
-        }
+        execute_native_id(current_xt);
     }
+
+    // Восстанавливаем исходный режим текстового парсера
+    current_forth_vm->state = previous_state;
+    current_forth_vm->ip = previous_ip;
 }
 
 /* Создание заголовка нового слова во внешней памяти SPI-RAM */
@@ -1554,6 +1662,29 @@ static void process_token(const char *token_name) {
 }
 
 void forth_interpret_line(const char *line) {
+    current_forth_vm->parse_line_ptr = line;
+
+    while (*current_forth_vm->parse_line_ptr != '\0') {
+        char token[FORTH_MAX_WORD_LEN];
+        // Считываем следующее слово из строки
+        if (!extract_next_token(&current_forth_vm->parse_line_ptr, token)) {
+            break; // Строка закончилась
+        }
+
+        // 1. Ищем слово двоичным поиском во Flash-таблице встроенных слов
+        const forth_word_builtin_t *word = find_builtin(token);
+        if (word != NULL) {
+            if (word->is_immediate || current_forth_vm->state == FORTH_STATE_REPL) {
+                word->handler(); // Команды и Дуалы выполняются ВСЕГДА
+            } else {
+                // Обычные примитивы в режиме компиляции просто списываются по XT_ID
+                hw_write32(current_forth_vm->dict_free_ptr, word->xt_id);
+                current_forth_vm->dict_free_ptr += 4;
+            }
+            continue;
+        }
+
+#if 0 /* старый код не подходит к новой парадигме массива buil-ins */
     char token[TOKEN_BUFFER_SIZE];
     uint32_t token_ptr = 0;
     int compiling_new_word = 0;
@@ -1643,6 +1774,7 @@ void forth_interpret_line(const char *line) {
     if (!current_forth_vm->abort_flag && !current_forth_vm->quiet_mode && current_forth_vm->state == 0) {
         printf(" ok\n");
     }
+#endif
 }
 
 /* ========================================================================= */

@@ -56,8 +56,7 @@ typedef enum {
     XT_COLON,
     XT_DOT_QUOTE,     /* ." */
     XT_PRIMITIVE_P_DOT_QUOTE, /* Скрытый рантайм-примитив (.") */
-    XT_S_QUOTE,               /* s" */
-    XT_PRIMITIVE_P_S_QUOTE,   /* Скрытый рантайм-примитив (s") */
+    XT_S_QUOTE,               /* dual: и команда, и скрытый рантайм-примитив (s") */
     XT_INCLUDED,               /* Теперь это честный Си-примитив ядра! */
     /* НОВЫЙ ТОКЕН ДЛЯ ВЫГРУЗКИ КАРТЫ ПАМЯТИ */
     XT_MEM_DUMP,
@@ -83,13 +82,13 @@ typedef enum {
 	XT_EMIT,
     XT_TO_R,   /* >r */
     XT_FROM_R,  /* r> */
-	XT_CMD_VARIABLE,          /* variable keyword compiler token */
-	XT_PRIMITIVE_P_VARIABLE,   /* The hidden execution-time worker token */
-    XT_CMD_CONSTANT,            /* constant */
-    XT_PRIMITIVE_P_CONSTANT,     /* Скрытый рантайм-обработчик константы */
+	//XT_CMD_VARIABLE,          /* variable keyword compiler token */
+	XT_PRIMITIVE_VAR_RT,   /* The hidden execution-time worker token */
+	XT_PRIMITIVE_CONSTANT_RT, /* команда создаёт константу, примитив возвращает её значение */
+    //XT_CMD_CONSTANT,            /* constant */
+    //XT_PRIMITIVE_P_CONSTANT,     /* Скрытый рантайм-обработчик константы */
 	XT_CMD_VALUE,            /* value */
-	XT_PRIMITIVE_P_TO,
-    XT_CMD_TO,               /* to */
+    XT_CMD_TO,               /* to / стрелка */
     XT_PRIMITIVE_P_VALUE,     /* Скрытый рантайм-обработчик значения */
 	XT_F_OPEN,              /* s" filename" f-open  ( c-addr len -- file-id ) */
 	XT_F_CREATE,              /* s" filename" f-create  ( c-addr len -- file-id ) */
@@ -196,14 +195,16 @@ void forth_primitive_dot_formatted(void);
 void forth_primitive_count(void);
 void forth_primitive_type(void);
 
-void forth_primitive_p_constant(void);
-void forth_cmd_constant(const char **line_ptr);
+void forth_cmd_constant(void);
+//void forth_primitive_p_constant(void);
+//void forth_cmd_constant(const char **line_ptr);
 void forth_primitive_p_value(void);
 void forth_cmd_value(const char **line_ptr);
-void forth_primitive_p_to(void);
-void forth_cmd_to(const char **line_ptr); /* TO и -> одинаково используют этот код, так задумано */
+//void forth_primitive_p_to(void);
+//void forth_cmd_to(const char **line_ptr); /* TO и -> одинаково используют этот код, так задумано */
+void forth_dual_to(void);
 void forth_primitive_p_variable(void);
-void forth_cmd_variable(const char **line_ptr);
+void forth_cmd_variable(void);
 
 void forth_dual_dot_quote(void);
 void forth_primitive_p_dot_quote(void);
@@ -211,7 +212,7 @@ void forth_cmd_dot_quote(const char **line_ptr);
 
 void forth_dual_char (void);
 void forth_cmd_char(const char **line_ptr);
-void forth_cmd_bracket_char(const char **line_ptr);
+void forth_dual_bracket_char (void);
 
 void forth_dual_s_quote(void);
 void forth_primitive_p_s_quote(void);

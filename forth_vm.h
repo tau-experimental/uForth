@@ -5,6 +5,12 @@
 
 #define FORTH_STACK_CELLS      64
 
+typedef enum {
+    FORTH_STATE_REPL      = 0,  // Текстовый интерактивный режим (выполняем текст из консоли)
+    FORTH_STATE_COMPILE   = 1,  // Текстовый режим компиляции (строим слово в SPI-RAM)
+    FORTH_STATE_RUNTIME   = 2   // Рантайм виртуальной машины (крутим готовый шитый код в SPI-RAM)
+} ForthState_t;
+
 /*
  * THE MONOLITHIC VIRTUAL MACHINE CONTEXT
  * This contains everything required to execute an independent Forth task.
@@ -19,9 +25,10 @@ typedef struct {
     uint32_t sp;               /* Data Stack Index (0 to FORTH_STACK_CELLS) */
     uint32_t rp;               /* Return Stack Index (0 to FORTH_STACK_CELLS) */
     uint32_t ip;               /* Instruction Pointer (Virtual PC for Threaded Code) */
-    uint32_t state;            /* 0 = Interpretation Mode (REPL), 1 = Compilation Mode */
+    ForthState_t state;            /* 0 = Interpretation Mode (REPL), 1 = Compilation Mode, 3 = Runtime */
     uint32_t latest_word;      /* Physical address of the latest compiled user word in SPI-RAM */
     uint32_t dict_free_ptr;    /* Compilation Frontier (Next free address in SPI-RAM dictionary space) */
+    const char *parse_line_ptr; // Текстовый указатель текущего разбора строки!
 
     /* Control & Exception Flags */
     volatile uint32_t abort_flag;
