@@ -25,15 +25,21 @@ static const char *const flash_init_constants[] = {
 
 #define INIT_CONSTANTS_COUNT  (sizeof(flash_init_constants) / sizeof(flash_init_constants[0]))
 
-void dummy_xt(void) {
-	/* Заглушка для инструкций, выполняемых парсером */
-}
+/* Массив скрытых примитивов ядра. Индекс в массиве равен XT_ID. */
+static const void (*kernel_primitive_handlers[])(void) = {
+    [XT_NONE]    = NULL,
+    [XT_LIT]     = forth_primitive_lit,
+    [XT_BRANCH]  = forth_primitive_branch,
+    [XT_0BRANCH] = forth_primitive_0branch,
+};
+
+#define KERNEL_PRIMITIVES_COUNT (sizeof(kernel_primitive_handlers) / sizeof(kernel_primitive_handlers[0]))
 
 /* Внимание разработчику: массив ДОЛЖЕН быть строго отсортирован по ASCII возрастанию! */
 static const forth_word_builtin_t builtin_words[] = {
     /* { name, handler, xt_id, is_immediate } */
 	{ "!", forth_primitive_store, XT_STORE, 0 },
-	{ ".\"", NULL, 0, 0 }, // заглушка для ."
+	{ ".\"", NULL, 0, 0 }, // временная заглушка для точки-кавычки ." ToDo: реализовать фнкционал!
 	{ "*",		forth_mul, 				XT_MUL, 0},
     { "+",     forth_add,    			XT_ADD,  0 },
     { "-",     forth_sub,    			XT_SUB,  0 },
@@ -44,7 +50,7 @@ static const forth_word_builtin_t builtin_words[] = {
 	{ ";",	forth_cmd_semicolon, XT_SEMICOLON, 0 },
 	{ "<", forth_less_than, XT_LESS_THAN, 0},
 	{ "<>", forth_not_equal, XT_NOT_EQUAL, 0},
-	{ "\\", forth_cmd_backslash, XT_BACKSLASH, 1},
+	{ "\\", forth_cmd_backslash, XT_BACKSLASH, 1}, /* комментарий - команда, которая только доходит до конца разбираемой строки и больше ничего не делает */
 	{ "=", forth_equal, XT_EQUAL, 0},
 	{ ">", forth_greater_than, XT_GREATER_THAN, 0},
 	{ ">R", forth_primitive_to_r, XT_TO_R, 0},
@@ -60,10 +66,10 @@ static const forth_word_builtin_t builtin_words[] = {
     { "BEGIN", forth_cmd_begin,        XT_CMD_BEGIN,  1 },
 	{ "C@", forth_primitive_c_fetch, XT_C_FETCH, 0 },
 	{ "C!", forth_primitive_c_store, XT_C_STORE, 0 },
-	{ "CHAR", forth_dual_bracket_char, XT_CMD_CHAR, 0 }, /* костыль парсера */
+	{ "CHAR", forth_dual_char, XT_CMD_CHAR, 1 },
 	{ "CR",    forth_cr,				XT_CR,	0 },
 	{ "COUNT", forth_primitive_count, XT_COUNT, 0 },
-	{ "CONSTANT", forth_cmd_constant, XT_PRIMITIVE_CONSTANT_RT, 0 },
+	{ "CONSTANT", forth_dual_constant, XT_PRIMITIVE_CONSTANT_RT, 0 },
 	{ "DUP", forth_dup, XT_DUP, 0 },
 	{ "DROP", forth_drop,        XT_DROP,  0 },
 	{ "ELSE", forth_cmd_else, XT_CMD_ELSE, 1 },
@@ -92,7 +98,7 @@ static const forth_word_builtin_t builtin_words[] = {
 	{ "TO", forth_dual_to, XT_CMD_TO, 1 }, /* синоним "стрелки" -> перехват в парсере */
 	{ "TYPE", forth_primitive_type, XT_TYPE , 0 },
 	{ "VALUE", dummy_xt, XT_CMD_VALUE, 0 }, /* не ошибка ли? */
-	{ "VARIABLE", forth_cmd_variable, XT_PRIMITIVE_VAR_RT, 0 },
+	{ "VARIABLE", forth_dual_variable, XT_PRIMITIVE_VAR_RT, 0 },
     { "UNTIL", forth_cmd_until,        XT_CMD_UNTIL,  1 },
 	{ "H.",	forth_primitive_dot_hex, XT_DOT_HEX, 0 },
 	{ "U.", forth_primitive_dot_unsigned, XT_DOT_UNSIGNED, 0 },
@@ -403,23 +409,53 @@ void forth_bracket_char (void) {
 	}
 }
 
-void forth_dual_bracket_char (void) {
-    // Берем указатель из контекста нашей VM
+void forth_dual_char(void) {
+    if (current_forth_vm->state == FORTH_STATE_RUNTIME) return; // Безопасность
+
     const char *p = current_forth_vm->parse_line_ptr;
+    char token[FORTH_MAX_WORD_LEN];
 
-    char ch = get_next_char_from_line(&p);
-
-    // Возвращаем обновленный указатель строки обратно в VM, чтобы парсер знал, где мы остановились
+    // Выкусываем аргумент (например, "A")
+    if (!extract_next_token(&p, token)) {
+        forth_abort("CHAR missing argument");
+        return;
+    }
     current_forth_vm->parse_line_ptr = p;
+    char ch = token[0]; // Берем первый символ токена
 
-    if (ch != '\0') {
+    if (current_forth_vm->state == FORTH_STATE_COMPILE) {
+        /* Запекаем пару [ XT_LIT ] -> [ код_символа ] */
         uint32_t free_ptr = current_forth_vm->dict_free_ptr;
         hw_write32(free_ptr, XT_LIT);
         hw_write32(free_ptr + 4, (uint32_t)ch);
         current_forth_vm->dict_free_ptr = free_ptr + 8;
     } else {
-        forth_abort("[CHAR] missing argument");
+        /* REPL: Кладем код ASCII на стек данных */
+        forth_push((uint32_t)ch);
     }
+}
+
+void forth_dual_bracket_char (void) {
+    if (current_forth_vm->state != FORTH_STATE_COMPILE) {
+        forth_abort("[CHAR] can only be used inside colon definitions");
+        return;
+    }
+
+    const char *p = current_forth_vm->parse_line_ptr;
+    char token[FORTH_MAX_WORD_LEN];
+
+    if (!extract_next_token(&p, token)) {
+        forth_abort("[CHAR] missing argument");
+        return;
+    }
+    current_forth_vm->parse_line_ptr = p;
+    char ch = token[0];
+
+    /* Запекаем литерал */
+    uint32_t free_ptr = current_forth_vm->dict_free_ptr;
+    hw_write32(free_ptr, XT_LIT);
+    hw_write32(free_ptr + 4, (uint32_t)ch);
+    current_forth_vm->dict_free_ptr = free_ptr + 8;
 }
 
 void forth_primitive_p_s_quote(void) {
@@ -436,7 +472,7 @@ void forth_primitive_p_s_quote(void) {
     current_forth_vm->ip += aligned_len;
 }
 
-void forth_cmd_constant(void) {
+void forth_dual_constant(void) {
     if (current_forth_vm->state == FORTH_STATE_RUNTIME) return; // Защита
 
     // 1. Выкусываем имя переменной из строки парсера (например, "MY-VAR")
@@ -456,7 +492,7 @@ void forth_cmd_constant(void) {
     dict_add_user_word(var_name, XT_PRIMITIVE_VAR_RT, var_data_addr);
 }
 
-void forth_cmd_variable(void) {
+void forth_dual_variable(void) {
     if (current_forth_vm->state == FORTH_STATE_RUNTIME) return; // Защита
 
     // 1. Выкусываем имя переменной из строки парсера (например, "MY-VAR")
@@ -691,40 +727,6 @@ void forth_primitive_p_constant(void) {
     current_forth_vm->ip = saved_ip;
 }
 
-/* Компилятор: создаёт слово-константу, забирая число со стека */
-void forth_cmd_constant(const char **line_ptr) {
-    const char *p = *line_ptr;
-    while (*p == ' ' || *p == '\t') p++;
-
-    char name_buf[TOKEN_BUFFER_SIZE];
-    uint32_t len = 0;
-    while (*p != ' ' && *p != '\t' && *p != '\r' && *p != '\n' && *p != '\0' && len < FORTH_MAX_WORD_LEN) {
-        name_buf[len++] = *p++;
-    }
-    name_buf[len] = '\0';
-    *line_ptr = p;
-
-    if (len == 0) {
-        forth_abort_with_context("CONSTANT missing name argument");
-        return;
-    }
-
-    /* Снимаем число со стека данных, которое было передано ПЕРЕД словом constant */
-    uint32_t const_val = forth_pop();
-    if (current_forth_vm->abort_flag) return;
-
-    /* Создаем стандартный заголовок слова в SPI-RAM */
-    dict_add_word(name_buf);
-
-    uint32_t free_ptr = current_forth_vm->dict_free_ptr;
-
-    /* Записываем скрытый токен рантайма константы */
-    hw_write32(free_ptr, XT_PRIMITIVE_P_CONSTANT);
-    /* Записываем само значение */
-    hw_write32(free_ptr + 4, const_val);
-
-    current_forth_vm->dict_free_ptr = free_ptr + 8;
-}
 
 /* Рантайм-обработчик: срабатывает, когда пользователь вызывает созданное слово VALUE */
 void forth_primitive_p_value(void) {
@@ -740,39 +742,6 @@ void forth_primitive_p_value(void) {
     current_forth_vm->ip = saved_ip;
 }
 
-/* Компилятор: срабатывает, когда в REPL пишут '0 value MY-VAL' */
-void forth_cmd_value(const char **line_ptr) {
-    const char *p = *line_ptr;
-    while (*p == ' ' || *p == '\t') p++;
-
-    char name_buf[TOKEN_BUFFER_SIZE];
-    uint32_t len = 0;
-    while (*p != ' ' && *p != '\t' && *p != '\r' && *p != '\n' && *p != '\0' && len < FORTH_MAX_WORD_LEN) {
-        name_buf[len++] = *p++;
-    }
-    name_buf[len] = '\0';
-    *line_ptr = p;
-
-    if (len == 0) {
-        forth_abort_with_context("VALUE missing name argument");
-        return;
-    }
-
-    /* Снимаем со стека начальное значение, которое было передано перед словом value */
-    uint32_t init_val = forth_pop();
-    if (current_forth_vm->abort_flag) return;
-
-    /* Создаем стандартный заголовок слова в SPI-RAM */
-    dict_add_word(name_buf);
-
-    uint32_t free_ptr = current_forth_vm->dict_free_ptr;
-    /* Записываем скрытый токен рантайма */
-    hw_write32(free_ptr, XT_PRIMITIVE_P_VALUE);
-    /* Записываем начальное значение */
-    hw_write32(free_ptr + 4, init_val);
-
-    current_forth_vm->dict_free_ptr = free_ptr + 8;
-}
 
 /* Новое рантайм-слово: выполнится тогда, когда запустится RUN-LIFECYCLE */
 void forth_primitive_p_to(void) {
@@ -792,55 +761,6 @@ void forth_primitive_p_to(void) {
     current_forth_vm->ip = ip + 4;
 }
 
-/* компилятор префикса TO / -> */
-void forth_cmd_to(const char **line_ptr) {
-#if 0 /* <- код требует переработки, сейчас он даже не компилируется */
-    uint32_t state = current_forth_vm->state;
-    const char *p = *line_ptr;
-
-    while (*p == ' ' || *p == '\t') p++;
-
-    char name_buf[TOKEN_BUFFER_SIZE];
-    uint32_t len = 0;
-    while (*p != ' ' && *p != '\t' && *p != '\r' && *p != '\n' && *p != '\0' && len < FORTH_MAX_WORD_LEN) {
-        name_buf[len++] = *p++;
-    }
-    name_buf[len] = '\0';
-    *line_ptr = p;
-
-    forth_xt_t builtin_xt = NULL;
-    uint32_t xt = dict_find(name_buf, &builtin_xt);
-
-    if (xt == 0 || builtin_xt != NULL) {
-        forth_abort_with_context("TO/-> target must be a valid user-defined VALUE");
-        return;
-    }
-
-    if (state == 1) {
-        /*
-         * РЕЖИМ КОМПИЛЯЦИИ (Внутри файла):
-         * Никаких forth_pop()! Мы просто пишем в шитый код инструкцию рантайм-записи
-         * XT_PRIMITIVE_P_TO, а следом за ней - XT-адрес нашего value-слова.
-         */
-        uint32_t free_ptr = current_forth_vm->dict_free_ptr;
-
-        hw_write32(free_ptr, XT_PRIMITIVE_P_TO);
-        hw_write32(free_ptr + 4, xt); /* Сохраняем адрес мишени прямо в коде */
-
-        current_forth_vm->dict_free_ptr = free_ptr + 8;
-    } else {
-        /* РЕЖИМ REPL (Прямой ввод из консоли) - старая рабочая логика */
-        uint32_t first_token = hw_read32(xt);
-        if (first_token == XT_PRIMITIVE_P_VALUE) {
-            uint32_t new_val = forth_pop();
-            if (current_forth_vm->abort_flag) return;
-            hw_write32(xt + 4, new_val);
-        } else {
-            forth_abort_with_context("TO/-> target is not a VALUE");
-        }
-    }
-#endif
-}
 
 /* The Hidden Worker: What happens when an instantiated variable is actually executed */
 void forth_primitive_p_variable(void) {
@@ -925,8 +845,19 @@ void forth_primitive_branch(void) {
 }
 
 void forth_primitive_0branch(void) {
-    int32_t offset = (forth_pop() == 0) ? (int32_t)hw_read32(current_forth_vm->ip) : 4;
-    current_forth_vm->ip += offset;
+    // 1. Достаем флаг со стека данных (результат операции сравнения внутри цикла)
+    uint32_t flag = forth_pop();
+
+    // 2. Читаем адрес перехода, который запечен следом в памяти
+    uint32_t target = hw_spi_ram_read32(current_forth_vm->ip);
+
+    if (flag == 0) {
+        // Если 0 (Ложь) — цикл продолжается, прыгаем назад на BEGIN
+        current_forth_vm->ip = target;
+    } else {
+        // Если Истина — выходим из цикла, шагаем через ячейку адреса дальше
+        current_forth_vm->ip += 4;
+    }
 }
 
 void forth_primitive_emit(void) {
@@ -938,7 +869,16 @@ void forth_primitive_emit(void) {
 
 /* Си-обработчик для слова обратного слэша: взводит флаг тишины до конца текущей строки */
 void forth_cmd_backslash(void) {
-    line_comment_flag = 1;
+    // Нам не важен state — комментарий просто пропускается и в REPL, и в компиляции
+    const char *p = current_forth_vm->parse_line_ptr;
+
+    // Двигаем указатель до конца строки или терминатора
+    while (*p != '\0' && *p != '\n' && *p != '\r') {
+        p++;
+    }
+
+    // Возвращаем обновленный указатель обратно в VM — парсер продолжит уже со следующей строки
+    current_forth_vm->parse_line_ptr = p;
 }
 
 #define MAX_OPEN_FILES  4
@@ -1128,26 +1068,30 @@ static mem_metrics_t get_current_mem_metrics(void) {
 }
 
 void forth_cmd_begin(void) {
-    uint32_t free_ptr = current_forth_vm->dict_free_ptr;
-    /* Просто сохраняем текущий адрес компиляции на стек возвратов RP как точку возврата */
-    forth_r_push(free_ptr);
+    if (current_forth_vm->state != FORTH_STATE_COMPILE) {
+        forth_abort("BEGIN used outside colon definition");
+        return;
+    }
+    // Запоминаем текущий адрес свободной памяти в SPI-RAM и кладем его на стек компиляции
+    forth_push(current_forth_vm->dict_free_ptr);
 }
 
 void forth_cmd_until(void) {
+    if (current_forth_vm->state != FORTH_STATE_COMPILE) {
+        forth_abort("UNTIL used outside colon definition");
+        return;
+    }
+    // Достаем со стека адрес, который там оставил BEGIN
+    uint32_t target_address = forth_pop();
+
     uint32_t free_ptr = current_forth_vm->dict_free_ptr;
-    /* Достаем адрес точки начала цикла BEGIN со стека RP */
-    uint32_t begin_addr = forth_r_pop();
-
-    /* 1. Компилируем условный переход назад */
+    // 1. Запекаем примитив условного перехода (бранч по нулю)
     hw_write32(free_ptr, XT_0BRANCH);
+    // 2. Сразу за ним запекаем физический адрес возврата
+    hw_write32(free_ptr + 4, target_address);
 
-    /* 2. Высчитываем отрицательное относительное смещение назад */
-    /* Смещение считается от ячейки самого смещения (free_ptr + 4) до begin_addr */
-    int32_t offset = (int32_t)begin_addr - (int32_t)(free_ptr + 4);
-
-    hw_write32(free_ptr + 4, (uint32_t)offset);
-
-    hw_write32(current_forth_vm->dict_free_ptr, free_ptr + 8);
+    // Сдвигаем границу памяти на 8 байт (токен + адрес)
+    current_forth_vm->dict_free_ptr = free_ptr + 8;
 }
 
 void forth_cmd_again(void) {
@@ -1251,105 +1195,30 @@ void forth_cmd_free(void) {
 #endif
 }
 
-/* Диспетчер вызова нативных Си-функций по их стабильному ID */
-static void execute_native_id(uint32_t token_id) {
-#if 0 /* подлежит исключению, так как сейчас через структуру сделана связка ID :: коллбэк. Но что делать с "костылями"? */
-    switch (token_id) {
-        case XT_EXIT:           forth_primitive_exit(); break;
-        case XT_ABORT:          forth_primitive_abort(); break;
-        case XT_CR:             forth_cr(); break;
-        case XT_DOT:            forth_dot(); break;
-        case XT_DOT_UNSIGNED:   forth_primitive_dot_unsigned(); break;
-        case XT_DOT_HEX:        forth_primitive_dot_hex(); break;
-        case XT_DOT_BINARY:     forth_primitive_dot_binary(); break;
-        case XT_DOT_FORMATTED: 	forth_primitive_dot_formatted(); break;
-        case XT_MUL:            forth_mul(); break;
-        case XT_SUB:            forth_sub(); break;
-        case XT_ADD:            forth_add(); break;
-        case XT_AND:            forth_primitive_and(); break;
-        case XT_OR:             forth_primitive_or(); break;
-        case XT_XOR:            forth_primitive_xor(); break;
-        case XT_INVERT:         forth_primitive_invert(); break;
-        case XT_LSHIFT:         forth_primitive_lshift(); break;
-        case XT_RSHIFT:         forth_primitive_rshift(); break;
-        case XT_ARSHIFT:        forth_primitive_arshift(); break;
-        case XT_DROP:           forth_drop(); break;
-        case XT_OVER:           forth_over(); break;
-        case XT_SWAP:           forth_swap(); break;
-        case XT_DUP:            forth_dup(); break;
-        case XT_0EQUAL:         forth_0equal(); break; /* ИСПРАВЛЕНИЕ */
-        /* РЕГИСТРАЦИЯ ОПЕРАТОРОВ ОТНОШЕНИЙ */
-        case XT_EQUAL:          forth_equal(); break;
-        case XT_NOT_EQUAL:      forth_not_equal(); break;
-        case XT_LESS_THAN:      forth_less_than(); break;
-        case XT_GREATER_THAN:   forth_greater_than(); break;
-        case XT_FAST_CELL_FREE: forth_cmd_fast_cell_free(); break;
-        case XT_FAST_CELL:      forth_cmd_fast_cell(); break;
-        case XT_FREE_CHUNK:     forth_cmd_free_chunk(); break;
-        case XT_ALLOC_CHUNK:    forth_cmd_alloc_chunk(); break;
-        case XT_TYPE: 			forth_primitive_type(); break;
-        case XT_COUNT:          forth_primitive_count(); break;
-        case XT_FREE:           forth_cmd_free(); break;
-        case XT_ALLOCATE:       forth_cmd_allocate(); break;
-        /* ИСПРАВЛЕНИЕ: Добавляем системные команды компилятора в диспетчер нативных ID */
-        case XT_SEMICOLON:      forth_cmd_semicolon(); break;
-        case XT_COLON:          forth_cmd_colon(); break;
-        case XT_MEM_DUMP:       forth_cmd_mem_dump(); break;
-        case XT_LIT:            forth_primitive_lit(); break;
-        case XT_BRANCH:         forth_primitive_branch(); break;
-        case XT_0BRANCH:        forth_primitive_0branch(); break;
-        case XT_CMD_IF:         forth_cmd_if(); break;
-        case XT_CMD_ELSE:       forth_cmd_else(); break;
-        case XT_CMD_THEN:       forth_cmd_then(); break;
-        case XT_CMD_BEGIN:      forth_cmd_begin(); break;
-        case XT_CMD_UNTIL:      forth_cmd_until(); break;
-        case XT_CMD_AGAIN:      forth_cmd_again(); break;
-        case XT_STORE:          forth_primitive_store(); break;
-        case XT_FETCH:          forth_primitive_fetch(); break;
-        case XT_C_STORE:        forth_primitive_c_store(); break;
-        case XT_C_FETCH:        forth_primitive_c_fetch(); break;
-        case XT_BACKSLASH:      forth_cmd_backslash(); break;
-        case XT_PRIMITIVE_P_DOT_QUOTE: forth_primitive_p_dot_quote(); break;
-        case XT_PRIMITIVE_P_S_QUOTE: forth_primitive_p_s_quote(); break;
-        case XT_INCLUDED:            forth_primitive_included(); break;
-        case XT_EMIT:           forth_primitive_emit(); break;
-        case XT_TO_R:           forth_primitive_to_r(); break;
-        case XT_FROM_R:         forth_primitive_from_r(); break;
-        case XT_PRIMITIVE_P_VALUE: forth_primitive_p_value(); break;
-		case XT_CMD_VALUE:         /* Прямой перехват в парсере */ break;
-		case XT_CMD_TO:            /* Прямой перехват в парсере */ break;
-		case XT_PRIMITIVE_P_TO: forth_primitive_p_to(); break;
-        case XT_PRIMITIVE_P_VARIABLE: forth_primitive_p_variable(); break;
-		case XT_CMD_VARIABLE: {
-			/* Handled direct-path via our interpret intercept parser line loop below */
-		}; break;
-		case XT_PRIMITIVE_P_CONSTANT: forth_primitive_p_constant(); break;
-		case XT_CMD_CONSTANT:          /* Прямой перехват в парсере */ break;
-        /* РЕГИСТРАЦИЯ СИМВОЛЬНЫХ ПАРСЕРОВ В ОБЩЕМ ДИСПЕТЧЕРЕ ТОКЕНОВ */
-        case XT_CMD_CHAR: {
-            /*
-             * Если слово вызвано через XT-токен, у нас в этот миг нет прямой строки.
-             * В реальном встраиваемом Forth в этот момент берется системный указатель
-             * на текущий буфер ввода терминала TIB (Terminal Input Buffer).
-             * Пока заложим вызов с заглушкой текущего контекста или предупреждением:
-             */
-            printf("[FORTH WARNING] CHAR invoked via XT requires active TIB context.\n");
-        } break;
-        case XT_CMD_BRACKET_CHAR: {
-            printf("[FORTH WARNING] [CHAR] is IMMEDIATE and should not be invoked via XT.\n");
-        }; break;
-
-        case XT_F_CREATE:       forth_primitive_f_create(); break;
-        case XT_F_OPEN:       forth_primitive_f_open(); break;
-        case XT_F_WRITE:        forth_primitive_f_write(); break;
-        case XT_F_READ:         forth_primitive_f_read(); break;
-        case XT_F_CLOSE:        forth_primitive_f_close(); break;
-
-        default:
-            printf("[FORTH FAULT] Attempt to execute unknown Native ID: %u\n", token_id);
-            exit(1);
+void execute_native_id(forth_xt_t xt) {
+    /* ВЕТКА А: Это скрытый примитив ядра (ID находится в диапазоне ядра) */
+    if (xt >= XT_KERNEL_START && xt < XT_KERNEL_END) {
+        // Мгновенный прямой прыжок по индексу массива за 1 такт процессора!
+        if (kernel_primitive_handlers[xt] != NULL) {
+            kernel_primitive_handlers[xt]();
+            return;
+        }
     }
-#endif
+
+    /* ВЕТКА Б: Это публичное встроенное слово (Примитив или Дуал) */
+    // Так как рантайм-вызов происходит из бинарного шитого кода в SPI-RAM,
+    // нам нужно быстро запустить Си-коллбэк этого публичного слова.
+    // Для этого при старте системы мы можем один раз построить небольшую
+    // SRAM-таблицу указателей для публичных XT_ID (как мы проектировали ранее),
+    // чтобы рантайм вообще никогда не делал поисков по циклу.
+
+    void (*public_handler)(void) = get_public_handler_by_id(xt);
+    if (public_handler != NULL) {
+        public_handler();
+        return;
+    }
+
+    forth_abort("Runtime Error: Unknown Execution Token");
 }
 
 /* Диспетчер выполнения шитого кода */
@@ -1600,18 +1469,25 @@ static void process_token(const char *token_name) {
 	/* проверяем, не является ли токен числом (в любом базисе) */
 	uint32_t numeric_val = 0;
 	if (parse_forth_number(token_name, &numeric_val)) {
+	    switch (current_forth_vm->state) {
+	        case FORTH_STATE_REPL:
+	            // В режиме REPL число просто прыгает на стек данных
+	            forth_push(numeric_val);
+	            break;
 
-		/* Если мы в режиме компиляции (state == 1) — компилируем литерал */
-		if (current_forth_vm->state == 1) {
-			uint32_t free_ptr = current_forth_vm->dict_free_ptr;
-			hw_write32(free_ptr, XT_LIT);
-			hw_write32(free_ptr + 4, numeric_val);
-			current_forth_vm->dict_free_ptr = free_ptr + 8;
-		} else {
-			/* Если в режиме REPL — просто выталкиваем число на стек */
-			forth_push(numeric_val);
-		}
-		return;
+	        case FORTH_STATE_COMPILE:
+	            // В режиме компиляции запекаем пару: [ примитив литерала ] -> [ само значение ]
+	            uint32_t free_ptr = current_forth_vm->dict_free_ptr;
+	            hw_write32(free_ptr, XT_LIT);
+	            hw_write32(free_ptr + 4, numeric_val);
+	            current_forth_vm->dict_free_ptr = free_ptr + 8;
+	            break;
+
+	        case FORTH_STATE_RUNTIME:
+	            // Виртуальная машина никогда не передает строки с числами в парсер во время рантайма,
+	            // так как в SPI-RAM числа уже лежат в виде бинарных данных за XT_LIT.
+	            break;
+	    }
 	}
 
 	/* ЕСЛИ ЭТО НЕ ЧИСЛО — ищем в пользовательском словаре (SPI-RAM) */
@@ -1665,116 +1541,38 @@ void forth_interpret_line(const char *line) {
     current_forth_vm->parse_line_ptr = line;
 
     while (*current_forth_vm->parse_line_ptr != '\0') {
-        char token[FORTH_MAX_WORD_LEN];
-        // Считываем следующее слово из строки
+        char token[TOKEN_BUFFER_SIZE];
         if (!extract_next_token(&current_forth_vm->parse_line_ptr, token)) {
-            break; // Строка закончилась
+            break; // Строка пуста или закончилась
         }
 
-        // 1. Ищем слово двоичным поиском во Flash-таблице встроенных слов
+        // Шаг 1: Ищем двоичным поиском во флэш-таблице встроенных слов
         const forth_word_builtin_t *word = find_builtin(token);
         if (word != NULL) {
+            // Единое жесткое правило диспетчеризации:
             if (word->is_immediate || current_forth_vm->state == FORTH_STATE_REPL) {
-                word->handler(); // Команды и Дуалы выполняются ВСЕГДА
+                word->handler(); // Выполняем Си-код (для примитивов в REPL, команд и дуалов)
             } else {
-                // Обычные примитивы в режиме компиляции просто списываются по XT_ID
+                // Обычный примитив в режиме компиляции — просто списываем его XT_ID в память
                 hw_write32(current_forth_vm->dict_free_ptr, word->xt_id);
                 current_forth_vm->dict_free_ptr += 4;
             }
             continue;
         }
 
-#if 0 /* старый код не подходит к новой парадигме массива buil-ins */
-    char token[TOKEN_BUFFER_SIZE];
-    uint32_t token_ptr = 0;
-    int compiling_new_word = 0;
+        // Шаг 2: Если не встроенное — ищем в пользовательском динамическом словаре в SPI-RAM
+        // ...
 
-    /* Сквозной указатель разбора строки */
-    const char *p = line;
-    line_comment_flag = 0;
-
-    while (*p != '\0') {
-        if (current_forth_vm->abort_flag || line_comment_flag) break;
-
-        char ch = *p;
-
-        if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
-            if (token_ptr > 0) {
-                token[token_ptr] = '\0';
-
-                if (compiling_new_word) {
-                    dict_add_word(token);
-                    compiling_new_word = 0;
-                } else if (strcasecmp(token, "value") == 0) {
-                    const char *current_pos = p;
-                    forth_cmd_value(&current_pos);
-                    p = current_pos;
-                    token_ptr = 0;
-                    continue;
-                } else if ((strcasecmp(token, "to") == 0) || (strcmp(token, "->") == 0)) {
-                    const char *current_pos = p;
-                    forth_cmd_to(&current_pos);
-                    p = current_pos;
-                    token_ptr = 0;
-                    continue;
-                } else if (strcasecmp(token, "constant") == 0) {
-                    const char *current_pos = p;
-                    forth_cmd_constant(&current_pos);
-                    p = current_pos;
-                    token_ptr = 0;
-                    continue;
-                } else if (strcasecmp(token, "variable") == 0) {
-                	/* Intercept the 'variable' statement inside your token router block */
-					const char *current_pos = p; // p is our current character tracker
-					forth_cmd_variable(&current_pos);
-					p = current_pos;
-					token_ptr = 0;
-					continue;
-				} else if (strcmp(token, ":") == 0) {
-                    forth_cmd_colon();
-                    compiling_new_word = 1;
-                } else if (strcasecmp(token, ".\"") == 0) {
-                    /*
-                     * ИДЕАЛЬНАЯ СИНХРОНИЗАЦИЯ: Передаем адрес текущего пробела.
-                     * Функция forth_cmd_dot_quote сама продвинет указатель p
-                     * строго за закрывающую кавычку строки!
-                     */
-                    forth_cmd_dot_quote(&p);
-                    token_ptr = 0;
-                    continue; /* Переходим к следующему символу, минуя p++ */
-                } else if (strcasecmp(token, "s\"") == 0) {
-                    forth_cmd_s_quote(&p);
-                    token_ptr = 0;
-                    continue;
-                } else {
-                    process_token(token);
-                }
-                token_ptr = 0;
-            }
-        } else {
-            if (token_ptr < FORTH_MAX_WORD_LEN) {
-                token[token_ptr++] = ch;
-            }
+        // Шаг 3: Если не нашли слово — проверяем, число ли это
+        uint32_t numeric_value;
+        if (try_parse_number(token, &numeric_value)) {
+            process_numeric_token(numeric_value);
+            continue;
         }
-        p++; /* Нативный Си-инкремент указателя */
-    }
 
-    /* Обработка остаточного токена в конце строки */
-    if (token_ptr > 0 && !current_forth_vm->abort_flag && !line_comment_flag) {
-        token[token_ptr] = '\0';
-        if (compiling_new_word) {
-            dict_add_word(token);
-        } else if (strcmp(token, ":") == 0) {
-            forth_cmd_colon();
-        } else {
-            process_token(token);
-        }
+        // Шаг 4: Если ничего не подошло — паникуем
+        forth_abort_unknown_token(token);
     }
-
-    if (!current_forth_vm->abort_flag && !current_forth_vm->quiet_mode && current_forth_vm->state == 0) {
-        printf(" ok\n");
-    }
-#endif
 }
 
 /* ========================================================================= */

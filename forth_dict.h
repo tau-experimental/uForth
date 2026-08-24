@@ -14,7 +14,16 @@
 /* Перечисление уникальных ID для встроенных Си-примитивов (Execution Tokens) */
 typedef enum {
     XT_NONE = 0,
-	XT_ABORT,                 /* abort */
+
+    /* --- СКРЫТЫЕ ПРИМИТИВЫ: Строго по порядку для прямой индексации --- */
+    XT_KERNEL_START,
+    XT_LIT = XT_KERNEL_START, // ID = 1
+    XT_BRANCH,               // ID = 2
+    XT_0BRANCH,              // ID = 3
+    XT_KERNEL_END,
+
+    /* --- ПУБЛИЧНЫЕ ТОКЕНЫ: Начинаются сразу после скрытых --- */
+	XT_ABORT = XT_KERNEL_END,                 /* abort */
     XT_EXIT,
     XT_CR,
     XT_DOT,
@@ -195,28 +204,17 @@ void forth_primitive_dot_formatted(void);
 void forth_primitive_count(void);
 void forth_primitive_type(void);
 
-void forth_cmd_constant(void);
-//void forth_primitive_p_constant(void);
-//void forth_cmd_constant(const char **line_ptr);
-void forth_primitive_p_value(void);
-void forth_cmd_value(const char **line_ptr);
-//void forth_primitive_p_to(void);
-//void forth_cmd_to(const char **line_ptr); /* TO и -> одинаково используют этот код, так задумано */
+void forth_dual_constant(void);
+void forth_dual_value(void);
 void forth_dual_to(void);
-void forth_primitive_p_variable(void);
-void forth_cmd_variable(void);
+void forth_dual_variable(void);
 
 void forth_dual_dot_quote(void);
-void forth_primitive_p_dot_quote(void);
-void forth_cmd_dot_quote(const char **line_ptr);
 
 void forth_dual_char (void);
-void forth_cmd_char(const char **line_ptr);
 void forth_dual_bracket_char (void);
 
 void forth_dual_s_quote(void);
-void forth_primitive_p_s_quote(void);
-void forth_cmd_s_quote(const char **line_ptr);
 
 void forth_primitive_f_open(void); /* открыть на чтение */
 void forth_primitive_f_create(void); /* открыть на запись */
